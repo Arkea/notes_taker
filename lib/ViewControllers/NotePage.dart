@@ -1,0 +1,488 @@
+import 'package:flutter/material.dart';
+import '../Model/Note.dart';
+import '../Model/SqliteHandler.dart';
+import 'dart:async';
+import '../Model/Utility.dart';
+import '../Views/MoreOptionsSheet.dart';
+import 'package:share/share.dart';
+import 'package:flutter/services.dart';
+
+class NotePage extends StatefulWidget {
+  final Note noteInEditing;
+
+  //constructor that takes a Note object
+  NotePage(this.noteInEditing);
+
+
+  @override
+  _NotePageState createState() => _NotePageState();
+}
+
+class _NotePageState extends State<NotePage> {
+
+  final _titleController = TextEditingController();
+  final _contentController = TextEditingController();
+  var note_color;
+  bool _isNewNote = false;
+  final _titleFocus = FocusNode();
+  final _contentFocus = FocusNode();
+
+  String _titleFrominitial ;
+  String _contentFromInitial;
+  DateTime _lastEditedForUndo;
+
+
+
+  var _editableNote;
+  bool _firsttime = true;
+
+  // the timer variable responsible to call persistData function every 5 seconds and cancel the timer when the page pops.
+  // Timer _persistenceTimer;
+
+  final GlobalKey<ScaffoldState> _globalKey = new GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    _editableNote = widget.noteInEditing;
+    _titleController.text = _editableNote.title;
+    _contentController.text = _editableNote.content;
+    note_color = _editableNote.note_color;
+    _lastEditedForUndo = widget.noteInEditing.date_last_edited;
+
+    _titleFrominitial = widget.noteInEditing.title;
+    _contentFromInitial = widget.noteInEditing.content;
+
+
+    if (widget.noteInEditing.id == -1) {
+      _isNewNote = true;
+    }
+    // _persistenceTimer = new Timer.periodic(Duration(seconds: 5), (timer) {
+    //   // call insert query here
+    //   print("5 seconds passed");
+    //   print("editable note id: ${_editableNote.id}");
+    //   _persistData();
+    // });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+
+    if(_editableNote.id == -1 && _editableNote.title.isEmpty && _firsttime) {
+      FocusScope.of(context).requestFocus(_contentFocus);
+      _firsttime = false;
+    }
+
+    return WillPopScope(
+      child: Scaffold(
+        key: _globalKey,
+        appBar: AppBar(brightness: Brightness.light,
+          leading: BackButton(
+            color: Colors.black,
+          ),
+          actions: _archiveAction(context),
+          elevation: 1,
+          backgroundColor: note_color,
+          title: _pageTitle(),
+        ),
+        body: _body(context),
+      ),
+      onWillPop: _readyToPop,
+    );
+  }
+
+  Widget _body(BuildContext ctx) {
+    return
+
+      Container(
+          color: note_color,
+          padding: EdgeInsets.only(left: 16, right: 16, top: 12),
+          child:
+
+          SafeArea(child:
+          Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: <Widget>[
+              Flexible(
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(5.0, 5.0, 5.0, 0.0),
+//          decoration: BoxDecoration(border: Border.all(color: CentralStation.borderColor,width: 1 ),borderRadius: BorderRadius.all(Radius.circular(10)) ),
+                  child: 
+                  TextField(
+                    onChanged: (str) => {updateNoteObject()},
+                    controller: _titleController,
+                    focusNode: _titleFocus,
+                    style: TextStyle(
+                      fontSize: 22,
+                    ),
+                    decoration: InputDecoration.collapsed(
+                      hintText: 'Note\'s Title',
+                    ).copyWith(isDense: true), // isDense to remove material padding
+                  )
+                ),
+              ),
+
+              Divider(color: CentralStation.borderColor,),
+
+              Flexible( child: Container(
+                  padding: EdgeInsets.fromLTRB(5.0, 0.0, 5.0, 0.0),
+//    decoration: BoxDecoration(border: Border.all(color: CentralStation.borderColor,width: 1),borderRadius: BorderRadius.all(Radius.circular(10)) ),
+                  child: EditableText(
+                    onChanged: (str) => {updateNoteObject()},
+                    maxLines: 300, // line limit extendable later
+                    controller: _contentController,
+                    focusNode: _contentFocus,
+                    style: TextStyle(color: Colors.black, fontSize: 20),
+                    backgroundCursorColor: Colors.red,
+                    cursorColor: Colors.blue,
+                  )
+              )
+              )
+
+            ],
+          ),
+            left: true,right: true,top: false,bottom: false,
+          )
+      )
+
+    ;
+  }
+
+  //returns a new text with "New Note" or "Edit Note" based on the value of _editableNote.id
+  Widget _pageTitle() {
+    return Text(_editableNote.id == -1 ? "New Note" : "Edit Note");
+  }
+
+  List<Widget> _archiveAction(BuildContext context) {
+    List<Widget> actions = [];
+    if (widget.noteInEditing.id != -1) {  // edit note
+      actions += [
+        Padding(  // Undo
+          padding: EdgeInsets.only(right: 15),
+          child: InkWell(
+            child: GestureDetector(
+              onTap: () => _undo(),
+              child: Icon(
+                Icons.undo,
+                color: CentralStation.fontColor,
+              ),
+            ),
+          ),
+        ),
+        // Padding(  // Archive
+        //   padding: EdgeInsets.only(right: 12),
+        //   child: InkWell(
+        //     child: GestureDetector(
+        //       onTap: () => _archivePopup(context),
+        //       child: Icon(
+        //         Icons.archive,
+        //         color: CentralStation.fontColor,
+        //       ),
+        //     ),
+        //   ),
+        // ),
+        // Padding(  // save note
+        //   padding: EdgeInsets.only(right: 15.0),
+        //   child: InkWell(
+        //     child: GestureDetector(
+        //       onTap: () => { _saveNote(context)  },
+        //       child: Icon(
+        //         Icons.save,
+        //         size: 26.0,
+        //         color: CentralStation.fontColor,
+        //       ),
+        //     ),
+        //   ),
+        // ),
+      ];
+    } else {
+      actions += [
+        // Padding(  // save note
+        //   padding: EdgeInsets.only(right: 15.0),
+        //   child: InkWell(
+        //     child: GestureDetector(
+        //       onTap: () => { _saveNote(context)  },
+        //       child: Icon(
+        //         Icons.save,
+        //         size: 26.0,
+        //         color: CentralStation.fontColor,
+        //       ),
+        //     ),
+        //   ),
+        // ),
+        Padding(  // save this note & create new one
+          padding: EdgeInsets.only(right: 15.0),
+          child: InkWell(
+            child: GestureDetector(
+              onTap: () => { _saveAndStartNewNote(context)  },
+              child: Icon(
+                Icons.add,
+                size: 30.0,
+                color: CentralStation.fontColor,
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    actions += [
+      Padding(  // More Options
+        padding: EdgeInsets.only(right: 15),
+        child: InkWell(
+          child: GestureDetector(
+            onTap: () => bottomSheet(context),
+            child: Icon(
+              Icons.more_vert,
+              color: CentralStation.fontColor,
+            ),
+          ),
+        ),
+      ),
+    ];
+
+    return actions;
+  }
+
+  //responsible for opening the moreOptionsSheet Class and its widgets
+  void bottomSheet(BuildContext context) {
+    showModalBottomSheet(
+        context: context,
+        builder: (BuildContext ctx) {
+          return MoreOptionsSheet(
+            color: note_color,
+            callBackColorTapped: _changeColor,
+            callBackOptionTapped: bottomSheetOptionTappedHandler,
+            date_last_edited: _editableNote.date_last_edited,
+          );
+        });
+  }
+
+  //saves data as the user makes changes and saves and updates this value whenever it changes
+  void _persistData() {
+    updateNoteObject();
+
+    if (_editableNote.content.isNotEmpty) {
+      var noteDB = NotesDBHandler();
+
+      if (_editableNote.id == -1) {
+        Future<int> autoIncrementedId =
+        noteDB.insertNote(_editableNote, true); // for new note
+        // set the id of the note from the database after inserting the new note so for next persisting
+        autoIncrementedId.then((value) {
+          _editableNote.id = value;
+        });
+      } else {
+        noteDB.insertNote(
+            _editableNote, false); // for updating the existing note
+      }
+    }
+  }
+
+// this function will be used to save the updated editing value of the note to the local variables as user types
+  void updateNoteObject() {
+    _editableNote.content = _contentController.text;
+    _editableNote.title = _titleController.text;
+    _editableNote.note_color = note_color;
+    // print("new content: ${_editableNote.content}");
+    // print(widget.noteInEditing);
+    // print(_editableNote);
+
+    // print("same title? ${_editableNote.title == _titleFrominitial}");
+    // print("same content? ${_editableNote.content == _contentFromInitial}");
+
+
+    if (!(_editableNote.title == _titleFrominitial &&
+        _editableNote.content == _contentFromInitial) ||
+        (_isNewNote)) {
+      // No changes to the note
+      // Change last edit time only if the content of the note is mutated in compare to the note which the page was called with.
+      _editableNote.date_last_edited = DateTime.now();
+      print("Updating date_last_edited");
+      CentralStation.updateNeeded = true;
+    }
+  }
+
+  //Handles callbacks on the MoreOptionsSheet
+  void bottomSheetOptionTappedHandler(moreOptions tappedOption) {
+    print("option tapped: $tappedOption");
+    switch (tappedOption) {
+      case moreOptions.delete:
+        {
+          if (_editableNote.id != -1) {
+            _deleteNote(_globalKey.currentContext);
+          } else {
+            _exitWithoutSaving(context);
+          }
+          break;
+        }
+      case moreOptions.share:
+        {
+          if (_editableNote.content.isNotEmpty) {
+            Share.share("${_editableNote.title}\n${_editableNote.content}");
+          }
+          break;
+        }
+      case moreOptions.copy : {
+        _copy();
+        break;
+      }
+    }
+  }
+
+  //deletes a saved note from the database when the user selects delete from the bottom sheet
+  void _deleteNote(BuildContext context) {
+    if (_editableNote.id != -1) {
+      showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text("Confirm ?"),
+              content: Text("This note will be deleted permanently"),
+              actions: <Widget>[
+                FlatButton(
+                    onPressed: () => {Navigator.of(context).pop()},
+                    child: Text("No")),
+                FlatButton(
+                    onPressed: () {
+                      // _persistenceTimer.cancel();
+                      var noteDB = NotesDBHandler();
+                      Navigator.of(context).pop(true);
+                      noteDB.deleteNote(_editableNote);
+                      CentralStation.updateNeeded = true;
+
+                      Navigator.of(context).pop(true);
+
+                    },
+                    child: Text("Yes")),
+                
+              ],
+            );
+          });
+    }
+  }
+
+  //responsible for responding whenever the user selects on a color by changing the color and saving the color
+  //value to the database
+  void _changeColor(Color newColorSelected) {
+    print("note color changed");
+    setState(() {
+      note_color = newColorSelected;
+      _editableNote.note_color = newColorSelected;
+    });
+    if (_editableNote.id != -1) {
+      var noteDB = NotesDBHandler();
+      _editableNote.note_color = note_color;
+      noteDB.insertNote(_editableNote, false);
+    }
+    CentralStation.updateNeeded = true;
+  }
+
+
+
+  //this function is called whenever the user clicks on the plus icon to add a new note from
+  //an already existing note.
+  void _saveAndStartNewNote(BuildContext context){
+    _persistData();
+    // _persistenceTimer.cancel();
+    var emptyNote = new Note(-1, "", "", DateTime.now(), DateTime.now(), Colors.white);
+    Navigator.of(context).pop();
+    Navigator.push(context, MaterialPageRoute(builder: (ctx) => NotePage(emptyNote)));
+
+  }
+
+  void _saveNote(BuildContext context){
+    _persistData();
+    // _persistenceTimer.cancel();
+    Navigator.of(context).pop();
+
+  }
+
+  Future<bool> _readyToPop() async {
+    // _persistenceTimer.cancel();
+    //show saved toast after calling _persistData function.
+
+    _persistData();
+    _firsttime = true;
+    
+    return true;
+  }
+
+  //build a pop up for whenever a user clicks on the archive icon,
+  // this prompt asks the user if he is sure before proceeding to archive the note
+
+  void _archivePopup(BuildContext context) {
+    if (_editableNote.id != -1) {
+      showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text("Confirm ?"),
+              content: Text("This note will be archived"),
+              actions: <Widget>[
+                FlatButton(
+                    onPressed: () => {Navigator.of(context).pop()},
+                    child: Text("No")),
+                FlatButton(
+                    onPressed: () => _archiveThisNote(context),
+                    child: Text("Yes")),
+              ],
+            );
+          });
+    } else {
+      _exitWithoutSaving(context);
+    }
+  }
+
+  //this function is called whenever a user clicks on a new note but no value is entered
+  void _exitWithoutSaving(BuildContext context) {
+    // _persistenceTimer.cancel();
+    CentralStation.updateNeeded = false;
+    Navigator.of(context).pop();
+  }
+
+  //responsible for archiving the note
+  void _archiveThisNote(BuildContext context) {
+    Navigator.of(context).pop();
+    // set archived flag to true and send the entire note object in the database to be updated
+    _editableNote.is_archived = 1;
+    var noteDB = NotesDBHandler();
+    noteDB.archiveNote(_editableNote);
+    // update will be required to remove the archived note from the staggered view
+    CentralStation.updateNeeded = true;
+    // _persistenceTimer.cancel(); // shutdown the timer
+
+    Navigator.of(context).pop(); // pop back to staggered view
+    // TODO: OPTIONAL show the toast of deletion completion
+    Scaffold.of(context).showSnackBar(new SnackBar(content: Text("deleted")));
+  }
+
+
+  //this function duplicates a note with the selected id whenever
+  //copy is tapped on from the bottom sheet
+  void _copy(){
+    var noteDB = NotesDBHandler();
+    Note copy = Note(-1,
+        _editableNote.title,
+        _editableNote.content,
+        DateTime.now(),
+        DateTime.now(),
+        _editableNote.note_color) ;
+
+
+    var status = noteDB.copyNote(copy);
+    status.then((query_success){
+      if (query_success){
+        CentralStation.updateNeeded = true;
+        Navigator.of(_globalKey.currentContext).pop();
+      }
+    });
+  }
+
+
+//undo changes made to the text using FLutter's TextController method
+  void _undo() {
+    _titleController.text = _titleFrominitial;// widget.noteInEditing.title;
+    _contentController.text = _contentFromInitial;// widget.noteInEditing.content;
+    _editableNote.date_last_edited = _lastEditedForUndo;// widget.noteInEditing.date_last_edited;
+  }
+}
